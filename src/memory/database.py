@@ -26,15 +26,25 @@ def init_db():
 def save_research(user_id: str, query: str, result: dict) -> int:
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    research_brief = result.get("research_brief", "")
+    final_report = result.get("final_report", "")
+    notes = result.get("notes", [])
+
+    # Ensure all values are proper types for sqlite3
+    if not isinstance(research_brief, str):
+        research_brief = json.dumps(research_brief) if research_brief else ""
+    if not isinstance(final_report, str):
+        final_report = json.dumps(final_report) if final_report else ""
+
     cursor.execute("""
         INSERT INTO research_history (user_id, query, research_brief, final_report, notes, created_at)
         VALUES (?, ?, ?, ?, ?, ?)
     """, (
         user_id,
         query,
-        result.get("research_brief", ""),
-        result.get("final_report", ""),
-        json.dumps(result.get("notes", [])),
+        research_brief,
+        final_report,
+        json.dumps(notes) if not isinstance(notes, str) else notes,
         datetime.now().isoformat(),
     ))
     row_id = cursor.lastrowid

@@ -89,6 +89,11 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
     """Supervisor LLM decides what research to delegate."""
     client = _get_client()
     research_brief = state.get("research_brief", "")
+    # Ensure research_brief is a string
+    if isinstance(research_brief, dict):
+        research_brief = json.dumps(research_brief)
+    elif not isinstance(research_brief, str):
+        research_brief = str(research_brief)
     max_iterations = 6
 
     supervisor_messages = state.get("supervisor_messages", [])
@@ -103,11 +108,17 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
     # Add conversation history
     for msg in supervisor_messages:
         if isinstance(msg, dict):
-            messages.append(msg)
+            # Ensure content is a string
+            content = msg.get("content", "")
+            if not isinstance(content, str):
+                content = json.dumps(content) if isinstance(content, dict) else str(content)
+            msg_copy = {k: (content if k == "content" else v) for k, v in msg.items()}
+            messages.append(msg_copy)
         elif isinstance(msg, AIMessage):
             messages.append({"role": "assistant", "content": msg.content or ""})
         elif isinstance(msg, ToolMessage):
-            messages.append({"role": "tool", "tool_call_id": msg.tool_call_id, "content": msg.content})
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            messages.append({"role": "tool", "tool_call_id": msg.tool_call_id, "content": content})
         elif isinstance(msg, HumanMessage):
             messages.append({"role": "user", "content": msg.content})
 
@@ -120,8 +131,8 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
             max_tokens=1000,
         )
     except Exception as e:
+        print(f"\n⚠️  Supervisor LLM call failed: {e}")
         return Command(goto="__end__", update={
-            "notes": state.get("notes", []),
             "research_brief": research_brief,
         })
 
@@ -159,7 +170,6 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
 
     if not last_msg:
         return Command(goto="__end__", update={
-            "notes": state.get("notes", []),
             "research_brief": state.get("research_brief", ""),
         })
 
@@ -171,10 +181,7 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
     research_done = any(tc["function"]["name"] == "research_complete" for tc in tool_calls)
 
     if no_tool_calls or over_limit or research_done:
-        # Collect all notes gathered
-        all_notes = state.get("notes", [])
         return Command(goto="__end__", update={
-            "notes": all_notes,
             "research_brief": state.get("research_brief", ""),
         })
 
@@ -234,3 +241,4 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
             "notes": all_new_notes,
         }
     )
+

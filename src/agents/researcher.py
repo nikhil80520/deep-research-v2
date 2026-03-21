@@ -146,7 +146,16 @@ async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
             tool_call_made = True
             result = ""
             if tc["name"] == "tavily_search":
-                result = await tavily_search.ainvoke(tc["args"])
+                args = tc["args"]
+                # Handle case where queries might be a string representation of a list
+                if isinstance(args.get("queries"), str):
+                    try:
+                        # Try to parse Python list representation
+                        args["queries"] = json.loads(args["queries"].replace("'", '"'))
+                    except Exception:
+                        # If parsing fails, wrap in a list
+                        args["queries"] = [args["queries"]]
+                result = await tavily_search.ainvoke(args)
             elif tc["name"] == "think_tool":
                 result = think_tool.invoke(tc["args"])
             else:

@@ -49,7 +49,6 @@ async def final_report_generation(state: AgentState, config=None) -> dict:
             return {
                 "final_report": report,
                 "messages": [AIMessage(content=report)],
-                "notes": {"type": "override", "value": []},  # Clear notes
             }
 
         except Exception as e:
@@ -61,11 +60,9 @@ async def final_report_generation(state: AgentState, config=None) -> dict:
             return {
                 "final_report": fallback,
                 "messages": [AIMessage(content=fallback)],
-                "notes": {"type": "override", "value": []},
             }
 
     return {
         "final_report": "Error: Report generation failed after maximum retries.",
         "messages": [AIMessage(content="Report generation failed.")],
-        "notes": {"type": "override", "value": []},
     }

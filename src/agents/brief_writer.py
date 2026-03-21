@@ -60,6 +60,12 @@ async def write_research_brief(state: AgentState, config=None) -> Command[Litera
 
     brief = result.get("research_brief", msg_str)
 
+    # Ensure brief is a string - LLM may return a dict instead of a string
+    if isinstance(brief, dict):
+        brief = json.dumps(brief, indent=2)
+    elif not isinstance(brief, str):
+        brief = str(brief)
+
     return Command(
         goto="research_supervisor",
         update={
