@@ -89,7 +89,6 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
     """Supervisor LLM decides what research to delegate."""
     client = _get_client()
     research_brief = state.get("research_brief", "")
-    # Ensure research_brief is a string
     if isinstance(research_brief, dict):
         research_brief = json.dumps(research_brief)
     elif not isinstance(research_brief, str):
@@ -108,7 +107,6 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
     # Add conversation history
     for msg in supervisor_messages:
         if isinstance(msg, dict):
-            # Ensure content is a string
             content = msg.get("content", "")
             if not isinstance(content, str):
                 content = json.dumps(content) if isinstance(content, dict) else str(content)
@@ -139,10 +137,22 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
     msg = response.choices[0].message
     tool_calls = _parse_tool_calls(msg)
 
+    # If no tool calls → end
+    if not tool_calls:
+        return Command(goto="__end__", update={
+            "research_brief": research_brief,
+        })
+
+    # If research_complete called → end
+    if any(tc["name"] == "research_complete" for tc in tool_calls):
+        return Command(goto="__end__", update={
+            "research_brief": research_brief,
+        })
+
     new_msg = {"role": "assistant", "content": msg.content or "", "tool_calls": [
         {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}}
         for tc in tool_calls
-    ] if tool_calls else None}
+    ]}
 
     return Command(
         goto="supervisor_tools",
@@ -181,6 +191,8 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
     research_done = any(tc["function"]["name"] == "research_complete" for tc in tool_calls)
 
     if no_tool_calls or over_limit or research_done:
+        if over_limit:
+            print(f"⏹️  Supervisor hit iteration limit ({max_iterations}), finishing research.")
         return Command(goto="__end__", update={
             "research_brief": state.get("research_brief", ""),
         })
@@ -198,6 +210,8 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
             args = json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"]
         except Exception:
             args = {}
+        reflection = args.get("reflection", "")
+        print(f"💭 Thinking: {reflection[:100]}...")
         result = think_tool.invoke(args)
         tool_messages.append({"role": "tool", "tool_call_id": tc["id"], "content": str(result)})
 
@@ -212,6 +226,7 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
             except Exception:
                 args = {}
             topic = args.get("research_topic", "")
+            print(f"🔍 Researcher starting: {topic[:80]}...")
             result = await researcher_node({
                 "research_topic": topic,
                 "researcher_messages": [],
@@ -227,6 +242,7 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
         for tool_call_id, result in results:
             compressed = result.get("compressed_research", "No findings.")
             raw = result.get("raw_notes", [])
+            print(f"✅ Researcher done: {len(compressed)} chars")
             all_new_notes.extend([compressed])
             tool_messages.append({
                 "role": "tool",
@@ -239,6 +255,8 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
         update={
             "supervisor_messages": tool_messages,
             "notes": all_new_notes,
+            "research_iterations": iterations + 1,
         }
     )
+
 

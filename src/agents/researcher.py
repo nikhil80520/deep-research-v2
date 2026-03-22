@@ -105,10 +105,14 @@ async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
         {"role": "user", "content": f"Research this topic thoroughly:\n\n{topic}"},
     ]
 
-    all_researcher_messages = list(state.get("researcher_messages", []))
-    tool_calls_made = state.get("tool_call_iterations", 0)
+    search_count = 0
+    max_searches = 5
+    done = False
 
     for _ in range(max_calls):
+        if done:
+            break
+
         try:
             response = client.chat.completions.create(
                 model="llama3.1-8b",
@@ -118,57 +122,60 @@ async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
                 max_tokens=1000,
             )
         except Exception as e:
+            print(f"  ⚠️  Researcher LLM call failed: {e}")
             break
 
         msg = response.choices[0].message
         tool_calls = _parse_tool_calls(msg)
 
-        # Add assistant message to history
-        messages.append({
+        # Add assistant message to history (with tool_calls if any)
+        assistant_msg = {
             "role": "assistant",
             "content": msg.content or "",
-            "tool_calls": [
+        }
+        if tool_calls:
+            assistant_msg["tool_calls"] = [
                 {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}}
                 for tc in tool_calls
-            ] if tool_calls else None
-        })
+            ]
+        messages.append(assistant_msg)
 
+        # No tool calls → LLM is done
         if not tool_calls:
             break
 
-        # Check for finish
-        if any(tc["name"] == "finish_research" for tc in tool_calls):
-            messages.append({"role": "tool", "tool_call_id": tool_calls[-1]["id"], "content": "Research complete."})
-            break
-
-        # Execute tools
+        # Execute each tool call and append tool response
         for tc in tool_calls:
-            tool_call_made = True
             result = ""
-            if tc["name"] == "tavily_search":
+
+            if tc["name"] == "finish_research":
+                result = "Research complete."
+                done = True
+            elif tc["name"] == "tavily_search":
                 args = tc["args"]
                 # Handle case where queries might be a string representation of a list
                 if isinstance(args.get("queries"), str):
                     try:
-                        # Try to parse Python list representation
                         args["queries"] = json.loads(args["queries"].replace("'", '"'))
                     except Exception:
-                        # If parsing fails, wrap in a list
                         args["queries"] = [args["queries"]]
                 result = await tavily_search.ainvoke(args)
+                search_count += 1
             elif tc["name"] == "think_tool":
                 result = think_tool.invoke(tc["args"])
             else:
                 result = f"Unknown tool: {tc['name']}"
 
+            # Always append tool response for every tool_call_id
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": str(result)[:3000],
-                "name": tc["name"],
             })
 
-        tool_calls_made += 1
+        # Auto-stop after max searches
+        if search_count >= max_searches:
+            done = True
 
     # Store messages for compression
     state_with_messages = {**state, "researcher_messages": [
@@ -182,3 +189,4 @@ async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
     # Compress and return
     result = await compress_research(state_with_messages)
     return result
+

@@ -13,7 +13,7 @@ def build_supervisor_subgraph():
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("supervisor_tools", supervisor_tools_node)
     builder.add_edge(START, "supervisor")
-    # Edges are handled via Command goto in supervisor_node and supervisor_tools_node
+    # Routing is handled via Command.goto in supervisor_node and supervisor_tools_node
     return builder.compile()
 
 
