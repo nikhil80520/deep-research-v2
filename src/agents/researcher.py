@@ -1,6 +1,5 @@
 import os
 import json
-import re
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 
 from src.graph.state import ResearcherState, ResearcherOutputState
@@ -94,7 +93,7 @@ def _parse_tool_calls(response_message) -> list[dict]:
     return tool_calls
 
 
-async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
+async def researcher_node(state: ResearcherState, config=None) -> ResearcherOutputState:
     """Run the researcher ReAct loop and return compressed findings."""
     client = _get_client()
     topic = state.get("research_topic", "")
@@ -153,12 +152,21 @@ async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
                 done = True
             elif tc["name"] == "tavily_search":
                 args = tc["args"]
-                # Handle case where queries might be a string representation of a list
-                if isinstance(args.get("queries"), str):
+                queries = args.get("queries", [])
+                # Handle string input
+                if isinstance(queries, str):
                     try:
-                        args["queries"] = json.loads(args["queries"].replace("'", '"'))
+                        queries = json.loads(queries.replace("'", '"'))
                     except Exception:
-                        args["queries"] = [args["queries"]]
+                        queries = [queries]
+                # Flatten nested lists (LLM sometimes returns [['q1'], ['q2']])
+                flat_queries = []
+                for q in queries:
+                    if isinstance(q, list):
+                        flat_queries.extend([str(x) for x in q])
+                    else:
+                        flat_queries.append(str(q))
+                args["queries"] = flat_queries
                 result = await tavily_search.ainvoke(args)
                 search_count += 1
             elif tc["name"] == "think_tool":
@@ -177,16 +185,26 @@ async def researcher_node(state: ResearcherState) -> ResearcherOutputState:
         if search_count >= max_searches:
             done = True
 
-    # Store messages for compression
-    state_with_messages = {**state, "researcher_messages": [
-        AIMessage(content=m.get("content", "") or "") if m["role"] == "assistant"
-        else ToolMessage(content=m.get("content", ""), tool_call_id=m.get("tool_call_id", ""), name=m.get("name", "tool"))
-        if m["role"] == "tool"
-        else HumanMessage(content=m.get("content", ""))
-        for m in messages[1:]  # Skip system message
-    ]}
+    # Convert raw messages to LangChain message types for compression
+    langchain_messages = []
+    for m in messages[1:]:  # Skip system message
+        if m["role"] == "assistant":
+            langchain_messages.append(AIMessage(content=m.get("content", "") or ""))
+        elif m["role"] == "tool":
+            langchain_messages.append(ToolMessage(
+                content=m.get("content", ""),
+                tool_call_id=m.get("tool_call_id", ""),
+                name=m.get("name", "tool")
+            ))
+        else:
+            langchain_messages.append(HumanMessage(content=m.get("content", "")))
 
-    # Compress and return
-    result = await compress_research(state_with_messages)
-    return result
+    # Compress research findings (pass config through)
+    compressed = await compress_research({
+        "researcher_messages": langchain_messages
+    }, config)
 
+    return {
+        "compressed_research": compressed.get("compressed_research", "No findings."),
+        "raw_notes": [compressed.get("raw_notes", "")],
+    }

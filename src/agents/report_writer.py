@@ -1,68 +1,76 @@
-import os
-from langchain_core.messages import AIMessage
+from langchain_core.messages import HumanMessage, AIMessage, get_buffer_string
+
 from src.graph.state import AgentState
 
 
-REPORT_SYSTEM = """You are a research report writer. Synthesize all research findings into a comprehensive, well-structured report.
+FINAL_REPORT_PROMPT = """Based on research, create a comprehensive report:
 
-Format requirements:
-- Use # for title, ## for sections, ### for subsections
-- Include inline citations as [1], [2], etc.
-- End with a ### Sources section listing all URLs
-- Be comprehensive — users expect deep research answers
-- Write in the same language as the user's original query
-- Do NOT refer to yourself as the writer"""
+<Research Brief>
+{research_brief}
+</Research Brief>
 
+<Messages>
+{messages}
+</Messages>
 
-def _get_client():
-    from cerebras.cloud.sdk import Cerebras
-    return Cerebras(api_key=os.getenv("CEREBRAS_API_KEY", ""))
+<Findings>
+{findings}
+</Findings>
+
+Today: {date}
+
+Requirements:
+1. Well-organized with ## headings
+2. Include specific facts from research
+3. Reference sources as [Title](URL)
+4. Comprehensive - users expect detailed answers
+5. Sources section at end
+
+Citation Rules:
+- Number sequentially: [1], [2], [3]...
+- End with ### Sources list
+"""
 
 
 async def final_report_generation(state: AgentState, config=None) -> dict:
-    """Synthesize all research findings into a final report with token limit retry."""
+    """Synthesize all research findings into a final report using official prompt."""
+    from src.config.configuration import Configuration
+    from datetime import datetime
+
+    configurable = Configuration.from_config(config)
     notes = state.get("notes", [])
-    research_brief = state.get("research_brief", "")
-    findings = "\n\n---\n\n".join(notes) if notes else "No research findings available."
+    findings = "\n\n".join(notes)
 
-    client = _get_client()
-    max_retries = 3
-    char_limit = 8000  # chars of findings to include
+    model = configurable.get_model()
 
-    for attempt in range(max_retries):
+    # Token limit retry
+    for attempt in range(3):
         try:
-            truncated_findings = findings[:char_limit]
-            response = client.chat.completions.create(
-                model="llama3.1-8b",
-                messages=[
-                    {"role": "system", "content": REPORT_SYSTEM},
-                    {"role": "user", "content": (
-                        f"Research Brief:\n{research_brief}\n\n"
-                        f"Research Findings:\n{truncated_findings}\n\n"
-                        f"Write a comprehensive research report based on these findings."
-                    )},
-                ],
-                max_tokens=3000,
+            prompt = FINAL_REPORT_PROMPT.format(
+                research_brief=state.get("research_brief", ""),
+                messages=get_buffer_string(state.get("messages", [])),
+                findings=findings,
+                date=datetime.now().strftime("%a %b %d, %Y")
             )
-            report = response.choices[0].message.content.strip()
 
+            response = await model.ainvoke([HumanMessage(content=prompt)])
             return {
-                "final_report": report,
-                "messages": [AIMessage(content=report)],
+                "final_report": str(response.content),
+                "messages": [AIMessage(content=str(response.content))],
             }
-
         except Exception as e:
-            if attempt < max_retries - 1:
-                char_limit = int(char_limit * 0.7)
+            if "token" in str(e).lower() or "context" in str(e).lower():
+                # 10% truncate
+                findings = findings[:int(len(findings) * 0.9)]
                 continue
-            # Final fallback
-            fallback = f"# Research Report\n\n{findings[:2000]}\n\n*Note: Full report generation failed. Raw findings above.*"
+            # Non-token error — fallback
+            fallback = f"# Research Report\n\n{findings[:2000]}\n\n*Note: Report generation failed: {e}*"
             return {
                 "final_report": fallback,
                 "messages": [AIMessage(content=fallback)],
             }
 
     return {
-        "final_report": "Error: Report generation failed after maximum retries.",
-        "messages": [AIMessage(content="Report generation failed.")],
+        "final_report": "Max retries exceeded",
+        "messages": [AIMessage(content="Max retries exceeded")],
     }

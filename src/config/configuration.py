@@ -35,3 +35,30 @@ class Configuration:
     @classmethod
     def from_env(cls) -> "Configuration":
         return cls()
+
+    @classmethod
+    def from_config(cls, config=None) -> "Configuration":
+        """Extract Configuration from LangGraph's RunnableConfig."""
+        if config and isinstance(config, dict):
+            configurable = config.get("configurable", {})
+            if isinstance(configurable, cls):
+                return configurable
+            if isinstance(configurable, dict):
+                return cls(**{
+                    k: v for k, v in configurable.items()
+                    if k in cls.__dataclass_fields__
+                })
+        return cls()
+
+    def get_model(self, structured_output=None):
+        """Return a langchain ChatModel configured for Cerebras."""
+        from langchain.chat_models import init_chat_model
+        model = init_chat_model(
+            model=self.llm_model,
+            model_provider="openai",
+            base_url="https://api.cerebras.ai/v1",
+            api_key=self.cerebras_api_key,
+        )
+        if structured_output:
+            model = model.with_structured_output(structured_output)
+        return model
