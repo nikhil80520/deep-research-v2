@@ -199,6 +199,7 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
 
     tool_messages = []
     all_new_notes = []
+    results = []
 
     # Separate think_tool calls from conduct_research calls
     think_calls = [tc for tc in tool_calls if tc["function"]["name"] == "think_tool"]
@@ -251,7 +252,7 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
             })
 
     # Collect raw_notes from all researchers
-    all_raw_notes = [r for tc_id, res in results for r in res.get("raw_notes", [])] if conduct_calls and 'results' in dir() else []
+    all_raw_notes = [r for tc_id, res in results for r in res.get("raw_notes", [])]
 
     return Command(
         goto="supervisor",
