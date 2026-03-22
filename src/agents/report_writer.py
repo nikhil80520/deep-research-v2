@@ -57,6 +57,7 @@ async def final_report_generation(state: AgentState, config=None) -> dict:
             return {
                 "final_report": str(response.content),
                 "messages": [AIMessage(content=str(response.content))],
+                "notes": [],
             }
         except Exception as e:
             if "token" in str(e).lower() or "context" in str(e).lower():

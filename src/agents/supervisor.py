@@ -250,11 +250,15 @@ async def supervisor_tools_node(state: SupervisorState, config=None) -> Command[
                 "content": compressed[:2000],
             })
 
+    # Collect raw_notes from all researchers
+    all_raw_notes = [r for tc_id, res in results for r in res.get("raw_notes", [])] if conduct_calls and 'results' in dir() else []
+
     return Command(
         goto="supervisor",
         update={
             "supervisor_messages": tool_messages,
             "notes": all_new_notes,
+            "raw_notes": all_raw_notes,
             "research_iterations": iterations + 1,
         }
     )

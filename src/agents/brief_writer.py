@@ -56,10 +56,7 @@ async def write_research_brief(state, config=None) -> Command[Literal["research_
             "research_brief": brief,
             "supervisor_messages": {
                 "type": "override",
-                "value": [
-                    {"role": "system", "content": "You are a research supervisor."},
-                    {"role": "user", "content": brief},
-                ]
+                "value": []
             }
         }
     )

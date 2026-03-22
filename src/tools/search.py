@@ -5,24 +5,6 @@ from langchain_core.tools import tool
 from tavily import AsyncTavilyClient
 
 
-async def _summarize_result(content: str, model_client, max_chars: int = 3000) -> str:
-    """Summarize a single search result using Cerebras."""
-    if not content or len(content) < 200:
-        return content
-    try:
-        response = model_client.chat.completions.create(
-            model="llama3.1-8b",
-            messages=[
-                {"role": "system", "content": "Summarize the following web content concisely. Preserve key facts, statistics, quotes, and URLs. Return plain text summary."},
-                {"role": "user", "content": content[:max_chars]},
-            ],
-            max_tokens=500,
-        )
-        return response.choices[0].message.content.strip()
-    except Exception:
-        return content[:max_chars]
-
-
 async def tavily_search_async(queries: List[str], max_results: int = 5) -> list[dict]:
     """Run multiple Tavily searches in parallel."""
     api_key = os.getenv("TAVILY_API_KEY", "")
