@@ -6,7 +6,7 @@ A multi-agent, deep research system powered by LangGraph, AWS Bedrock, and Tavil
 ![LangGraph](https://img.shields.io/badge/Framework-LangGraph-000000?style=flat-square)
 ![AWS Bedrock](https://img.shields.io/badge/LLM-AWS_Bedrock-232F3E?style=flat-square&logo=amazon-aws)
 
-<video src="demo.mp4" controls="controls" muted="muted" width="800"></video>
+▶️ **[Watch the Deep Research Dashboard Demo Video](demo.mp4)**
 
 ## ✨ Key Features
 
