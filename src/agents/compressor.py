@@ -1,4 +1,4 @@
-from langchain_core.messages import HumanMessage, SystemMessage, filter_messages
+from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage, filter_messages
 
 
 COMPRESS_SYSTEM = """You are compressing research findings. 
@@ -22,7 +22,10 @@ async def compress_research(state, config=None):
     from datetime import datetime
 
     configurable = Configuration.from_config(config)
-    researcher_messages = list(state.get("researcher_messages", []))
+    researcher_messages = [
+        HumanMessage(content=m.content) if isinstance(m, ToolMessage) else m
+        for m in list(state.get("researcher_messages", []))
+    ]
 
     # Append compression instruction
     researcher_messages = researcher_messages + [

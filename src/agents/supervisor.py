@@ -1,4 +1,3 @@
-import os
 import json
 import asyncio
 from typing import Literal
@@ -68,9 +67,82 @@ COMPLETE_TOOL_DEF = {
 }
 
 
-def _get_client():
-    from cerebras.cloud.sdk import Cerebras
-    return Cerebras(api_key=os.getenv("CEREBRAS_API_KEY", ""))
+def _get_client(configurable):
+    import boto3
+    return boto3.client(
+        "bedrock-runtime",
+        region_name=configurable.aws_region,
+        aws_access_key_id=configurable.aws_access_key_id or None,
+        aws_secret_access_key=configurable.aws_secret_access_key or None,
+        aws_session_token=configurable.aws_session_token or None,
+    )
+
+
+def _bedrock_tools(tool_defs: list[dict]) -> list[dict]:
+    tools = []
+    for tool_def in tool_defs:
+        func = tool_def.get("function", {})
+        tools.append({
+            "toolSpec": {
+                "name": func.get("name", ""),
+                "description": func.get("description", ""),
+                "inputSchema": {"json": func.get("parameters", {})},
+            }
+        })
+    return tools
+
+
+def _openai_messages_to_bedrock(messages: list[dict]) -> list[dict]:
+    bedrock_messages = []
+    for msg in messages:
+        role = msg.get("role")
+        if role == "assistant":
+            content = []
+            text = msg.get("content") or ""
+            if text:
+                content.append({"text": text})
+
+            tool_calls = msg.get("tool_calls") or []
+            for tc in tool_calls:
+                func = tc.get("function", {})
+                tool_use_id = tc.get("id", "")
+                try:
+                    tool_input = json.loads(func.get("arguments", "{}")) if isinstance(func.get("arguments"), str) else func.get("arguments", {})
+                except Exception:
+                    tool_input = {}
+                content.append({
+                    "toolUse": {
+                        "toolUseId": tool_use_id,
+                        "name": func.get("name", ""),
+                        "input": tool_input,
+                    }
+                })
+
+            bedrock_messages.append({
+                "role": "assistant",
+                "content": content or [{"text": ""}],
+            })
+        elif role == "tool":
+            tool_call_id = msg.get("tool_call_id", "")
+            tool_text = msg.get("content", "")
+            bedrock_messages.append({
+                "role": "user",
+                "content": [
+                    {
+                        "toolResult": {
+                            "toolUseId": tool_call_id,
+                            "content": [{"text": str(tool_text)}],
+                            "status": "success",
+                        }
+                    }
+                ],
+            })
+        else:
+            bedrock_messages.append({
+                "role": "user",
+                "content": [{"text": str(msg.get("content", ""))}],
+            })
+    return bedrock_messages
 
 
 def _parse_tool_calls(msg) -> list[dict]:
@@ -87,7 +159,10 @@ def _parse_tool_calls(msg) -> list[dict]:
 
 async def supervisor_node(state: SupervisorState, config=None) -> Command[Literal["supervisor_tools", "__end__"]]:
     """Supervisor LLM decides what research to delegate."""
-    client = _get_client()
+    from src.config.configuration import Configuration
+
+    configurable = Configuration.from_config(config)
+    client = _get_client(configurable)
     research_brief = state.get("research_brief", "")
     if isinstance(research_brief, dict):
         research_brief = json.dumps(research_brief)
@@ -98,9 +173,8 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
     supervisor_messages = state.get("supervisor_messages", [])
     iterations = state.get("research_iterations", 0)
 
-    # Build message history for Cerebras
+    # Build message history for Bedrock
     messages = [
-        {"role": "system", "content": SUPERVISOR_SYSTEM.format(max_iterations=max_iterations)},
         {"role": "user", "content": research_brief},
     ]
 
@@ -121,12 +195,15 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
             messages.append({"role": "user", "content": msg.content})
 
     try:
-        response = client.chat.completions.create(
-            model="llama3.1-8b",
-            messages=messages,
-            tools=[CONDUCT_TOOL_DEF, THINK_TOOL_DEF, COMPLETE_TOOL_DEF],
-            tool_choice="auto",
-            max_tokens=1000,
+        response = client.converse(
+            modelId=configurable.llm_model,
+            system=[{"text": SUPERVISOR_SYSTEM.format(max_iterations=max_iterations)}],
+            messages=_openai_messages_to_bedrock(messages),
+            toolConfig={
+                "tools": _bedrock_tools([CONDUCT_TOOL_DEF, THINK_TOOL_DEF, COMPLETE_TOOL_DEF]),
+                "toolChoice": {"auto": {}},
+            },
+            inferenceConfig={"maxTokens": 1000},
         )
     except Exception as e:
         print(f"\n⚠️  Supervisor LLM call failed: {e}")
@@ -134,8 +211,21 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
             "research_brief": research_brief,
         })
 
-    msg = response.choices[0].message
-    tool_calls = _parse_tool_calls(msg)
+    content = response.get("output", {}).get("message", {}).get("content", [])
+    text_parts = []
+    tool_calls = []
+    for item in content:
+        if "text" in item:
+            text_parts.append(item["text"])
+        if "toolUse" in item:
+            tool = item["toolUse"]
+            tool_calls.append({
+                "id": tool.get("toolUseId", ""),
+                "name": tool.get("name", ""),
+                "args": tool.get("input", {}) or {},
+            })
+
+    msg_content = "\n".join(t for t in text_parts if t).strip()
 
     # If no tool calls → end
     if not tool_calls:
@@ -149,7 +239,7 @@ async def supervisor_node(state: SupervisorState, config=None) -> Command[Litera
             "research_brief": research_brief,
         })
 
-    new_msg = {"role": "assistant", "content": msg.content or "", "tool_calls": [
+    new_msg = {"role": "assistant", "content": msg_content or "", "tool_calls": [
         {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}}
         for tc in tool_calls
     ]}

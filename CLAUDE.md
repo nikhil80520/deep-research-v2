@@ -4,12 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A multi-agent deep research system built with LangGraph. Uses a supervisor-researcher pattern where a supervisor agent delegates parallel research tasks to sub-researchers, each conducting web searches and synthesizing findings. The system integrates with Cerebras (LLM), Tavily (search), mem0 (memory), and SQLite (persistence).
+A multi-agent deep research system built with LangGraph. Uses a supervisor-researcher pattern where a supervisor agent delegates parallel research tasks to sub-researchers, each conducting web searches and synthesizing findings. The system integrates with Cerebras (LLM), Tavily (search), and SQLite (persistence).
 
 ## Running the Application
 
 Three entry points are available:
-
 ```bash
 # CLI mode
 python run.py
@@ -32,7 +31,7 @@ pip install -r requirements.txt
 
 # Environment variables (copy .env.example to .env)
 cp .env.example .env
-# Required: CEREBRAS_API_KEY, TAVILY_API_KEY, MEM0_API_KEY, DB_PATH
+# Required: CEREBRAS_API_KEY, TAVILY_API_KEY, DB_PATH
 ```
 
 ## Architecture
@@ -74,7 +73,6 @@ Uses TypedDict state classes with reducers:
 ### Memory (src/memory/)
 
 - `database.py`: SQLite persistence for research history
-- `mem0_client.py`: Semantic memory integration (optional, gracefully degrades if not configured)
 
 ### Configuration (src/config/configuration.py)
 
@@ -88,7 +86,6 @@ Key limits (defined in `Configuration`):
 
 - `POST /research` - Run research query (accepts `query`, `user_id`)
 - `GET /history/{user_id}` - Get research history from SQLite
-- `GET /memories/{user_id}` - Get mem0 memories for user
 - `GET /health` - Health check
 
 ## Important Patterns

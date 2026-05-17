@@ -6,12 +6,10 @@ load_dotenv()
 from langchain_core.messages import HumanMessage
 from src.graph.workflow import deep_research_graph
 from src.memory.database import init_db, save_research
-from src.memory.mem0_client import init_memory, add_memory
 
 
 async def main():
     init_db()
-    init_memory()
 
     # Simulate the user's interaction
     query = "what is mamba 3"
@@ -66,8 +64,7 @@ async def main():
         "final_report": report,
         "notes": result.get("notes", []),
     })
-    add_memory(user_id, query, report[:300])
-    print("\n✅ Research saved to SQLite and mem0.")
+    print("\n✅ Research saved to SQLite.")
 
 
 if __name__ == "__main__":

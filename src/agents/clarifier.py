@@ -1,8 +1,7 @@
-import os
 import json
 import re
 from typing import Literal
-from langchain_core.messages import AIMessage, get_buffer_string
+from langchain_core.messages import AIMessage, HumanMessage, get_buffer_string
 from langgraph.types import Command
 
 from src.graph.state import AgentState, ClarifyWithUser
@@ -27,11 +26,6 @@ Respond in valid JSON:
 }"""
 
 
-def _get_client():
-    from cerebras.cloud.sdk import Cerebras
-    return Cerebras(api_key=os.getenv("CEREBRAS_API_KEY", ""))
-
-
 def _parse_json(text: str) -> dict:
     match = re.search(r'\{.*\}', text, re.DOTALL)
     if match:
@@ -47,17 +41,16 @@ async def clarify_with_user(state: AgentState, config=None) -> Command[Literal["
     messages = state.get("messages", [])
     msg_str = get_buffer_string(messages) if messages else ""
 
-    client = _get_client()
+    from src.config.configuration import Configuration
+    configurable = Configuration.from_config(config)
+    model = configurable.get_model()
+
     try:
-        response = client.chat.completions.create(
-            model="llama3.1-8b",
-            messages=[
-                {"role": "system", "content": CLARIFY_SYSTEM},
-                {"role": "user", "content": f"Messages so far:\n{msg_str}\n\nShould I ask a clarifying question?"},
-            ],
-            max_tokens=300,
-        )
-        result = _parse_json(response.choices[0].message.content)
+        response = await model.ainvoke([
+            HumanMessage(content=CLARIFY_SYSTEM),
+            HumanMessage(content=f"Messages so far:\n{msg_str}\n\nShould I ask a clarifying question?"),
+        ])
+        result = _parse_json(str(response.content))
     except Exception:
         result = {"need_clarification": False, "question": "", "verification": "Starting research now."}
 

@@ -1,6 +1,5 @@
 import os
 from dataclasses import dataclass, field
-from typing import Optional
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -8,8 +7,11 @@ load_dotenv()
 @dataclass
 class Configuration:
     # LLM
-    llm_model: str = "llama3.1-8b"
-    cerebras_api_key: str = field(default_factory=lambda: os.getenv("CEREBRAS_API_KEY", ""))
+    llm_model: str = field(default_factory=lambda: Configuration.resolve_bedrock_model_id())
+    aws_region: str = field(default_factory=lambda: os.getenv("AWS_REGION", "us-east-1"))
+    aws_access_key_id: str = field(default_factory=lambda: os.getenv("AWS_ACCESS_KEY_ID", ""))
+    aws_secret_access_key: str = field(default_factory=lambda: os.getenv("AWS_SECRET_ACCESS_KEY", ""))
+    aws_session_token: str = field(default_factory=lambda: os.getenv("AWS_SESSION_TOKEN", ""))
 
     # Search
     search_api: str = "tavily"
@@ -29,12 +31,24 @@ class Configuration:
     max_report_tokens: int = 4000
 
     # Memory
-    mem0_api_key: str = field(default_factory=lambda: os.getenv("MEM0_API_KEY", ""))
     db_path: str = field(default_factory=lambda: os.getenv("DB_PATH", "./research_history.db"))
 
     @classmethod
     def from_env(cls) -> "Configuration":
         return cls()
+
+    @staticmethod
+    def resolve_bedrock_model_id() -> str:
+        """Resolve Bedrock model id from env, stripping quotes/spaces."""
+        candidates = [
+            os.getenv("BEDROCK_MODEL_ID", ""),
+            os.getenv("BEDROCK_LLM_MODEL", ""),
+        ]
+        for value in candidates:
+            cleaned = (value or "").strip().strip('"').strip("'")
+            if cleaned:
+                return cleaned
+        return "qwen.qwen3-32b-v1:0"
 
     @classmethod
     def from_config(cls, config=None) -> "Configuration":
@@ -51,13 +65,15 @@ class Configuration:
         return cls()
 
     def get_model(self, structured_output=None):
-        """Return a langchain ChatModel configured for Cerebras."""
-        from langchain.chat_models import init_chat_model
-        model = init_chat_model(
+        """Return a LangChain ChatModel configured for AWS Bedrock."""
+        from langchain_aws import ChatBedrockConverse
+
+        model = ChatBedrockConverse(
             model=self.llm_model,
-            model_provider="openai",
-            base_url="https://api.cerebras.ai/v1",
-            api_key=self.cerebras_api_key,
+            region_name=self.aws_region,
+            aws_access_key_id=self.aws_access_key_id or None,
+            aws_secret_access_key=self.aws_secret_access_key or None,
+            aws_session_token=self.aws_session_token or None,
         )
         if structured_output:
             model = model.with_structured_output(structured_output)

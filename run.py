@@ -6,29 +6,41 @@ load_dotenv()
 from langchain_core.messages import HumanMessage
 from src.graph.workflow import deep_research_graph
 from src.memory.database import init_db, save_research
-from src.memory.mem0_client import init_memory, add_memory
 
 
 async def main():
     init_db()
-    init_memory()
 
-    # Validate Cerebras API key before starting
-    cerebras_key = os.getenv("CEREBRAS_API_KEY", "")
-    if not cerebras_key:
-        print("❌ CEREBRAS_API_KEY is not set. Please add it to your .env file.")
+    from src.config.configuration import Configuration
+
+    # Validate AWS Bedrock credentials before starting
+    aws_access_key_id = os.getenv("AWS_ACCESS_KEY_ID", "")
+    aws_secret_access_key = os.getenv("AWS_SECRET_ACCESS_KEY", "")
+    aws_region = os.getenv("AWS_REGION", "us-east-1")
+    bedrock_model_id = Configuration.resolve_bedrock_model_id()
+
+    if not aws_access_key_id or not aws_secret_access_key:
+        print("❌ AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required in .env")
         return
     try:
-        from cerebras.cloud.sdk import Cerebras
-        client = Cerebras(api_key=cerebras_key)
-        client.chat.completions.create(
-            model="llama3.1-8b",
-            messages=[{"role": "user", "content": "hi"}],
-            max_tokens=1,
+        import boto3
+
+        client = boto3.client(
+            "bedrock-runtime",
+            region_name=aws_region,
+            aws_access_key_id=aws_access_key_id,
+            aws_secret_access_key=aws_secret_access_key,
+            aws_session_token=os.getenv("AWS_SESSION_TOKEN") or None,
+        )
+        # Lightweight capability check; verifies credentials and model access.
+        client.converse(
+            modelId=bedrock_model_id,
+            messages=[{"role": "user", "content": [{"text": "hi"}]}],
+            inferenceConfig={"maxTokens": 1, "temperature": 0},
         )
     except Exception as e:
-        print(f"❌ Cerebras API key validation failed: {e}")
-        print("   Please check your CEREBRAS_API_KEY in the .env file.")
+        print(f"❌ AWS Bedrock validation failed: {e}")
+        print("   Check AWS credentials, region, and BEDROCK_MODEL_ID/BEDROCK_LLM_MODEL in .env")
         return
 
     query = input("Enter research query: ").strip()
@@ -91,8 +103,7 @@ async def main():
         "final_report": report,
         "notes": result.get("notes", []),
     })
-    add_memory(user_id, query, report[:300] if isinstance(report, str) else str(report)[:300])
-    print("\n✅ Research saved to SQLite and mem0.")
+    print("\n✅ Research saved to SQLite.")
 
 
 if __name__ == "__main__":
